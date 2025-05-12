@@ -11,8 +11,11 @@ import {
   doc,
   updateDoc,
   deleteDoc,
+  setDoc,
+  getDoc,
 } from "firebase/firestore";
 import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { User } from '../types/social';
 
 // Auth functions
 export const logoutUser = () => signOut(auth);
@@ -45,6 +48,35 @@ export const updateDocument = (collectionName: string, id: string, data: any) =>
 
 export const deleteDocument = (collectionName: string, id: string) =>
   deleteDoc(doc(db, collectionName, id));
+
+export const createUserProfile = async (user: any) => {
+  const userRef = doc(db, 'users', user.uid);
+  const userSnap = await getDoc(userRef);
+
+  if (!userSnap.exists()) {
+    const newUser: User = {
+      id: user.uid,
+      displayName: user.displayName || 'Anonymous',
+      email: user.email || '',
+      photoURL: user.photoURL || '',
+      createdAt: new Date(),
+      updatedAt: new Date()
+    };
+
+    await setDoc(userRef, newUser);
+  }
+};
+
+export const getUserProfile = async (userId: string) => {
+  const userRef = doc(db, 'users', userId);
+  const userSnap = await getDoc(userRef);
+
+  if (userSnap.exists()) {
+    return userSnap.data() as User;
+  }
+
+  return null;
+};
 
 // Storage functions
 export const uploadFile = async (file: File, path: string) => {

@@ -1,20 +1,47 @@
-import Link from "next/link";
+'use client';
+
+import { useEffect, useState } from 'react';
+import { collection, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase/firebase';
+import { Post as PostType } from '@/lib/types/social';
+import Post from '@/components/Post';
+import { useAuth } from '@/lib/hooks/useAuth';
 
 export default function Home() {
-  return (
-    <main className="flex min-h-screen flex-col items-center justify-between p-8">
-      <div>
-        <h2 className="text-2xl font-semibold text-center border p-4 font-mono rounded-md">
-          Starter Template
-        </h2>
-      </div>
-      <div>
-        <h1 className="text-6xl font-bold text-center">3, 2, 1... Go!</h1>
-        <h2 className="text-2xl text-center font-light text-gray-500 pt-4">
-          This page will be replaced with your app.
-        </h2>
-      </div>
+  const [posts, setPosts] = useState<PostType[]>([]);
+  const { user } = useAuth();
+
+  useEffect(() => {
+    const q = query(collection(db, 'posts'), orderBy('createdAt', 'desc'));
+    
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const postsData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      })) as PostType[];
       
-    </main>
+      setPosts(postsData);
+    });
+
+    return () => unsubscribe();
+  }, []);
+
+  if (!user) {
+    return (
+      <div className="flex items-center justify-center min-h-screen">
+        <p className="text-xl text-gray-600">Please sign in to view posts</p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-2xl mx-auto p-4">
+      <h1 className="text-2xl font-bold mb-6">Home Feed</h1>
+      <div className="space-y-4">
+        {posts.map((post) => (
+          <Post key={post.id} post={post} />
+        ))}
+      </div>
+    </div>
   );
 }
