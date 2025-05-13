@@ -13,10 +13,84 @@ export default function CreatePost() {
   const [content, setContent] = useState('');
   const [image, setImage] = useState<File | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      setImage(e.target.files[0]);
+      const file = e.target.files[0];
+      // Check file size (max 5MB)
+      if (file.size > 5 * 1024 * 1024) {
+        setError('Image size should be less than 5MB');
+        return;
+      }
+      setImage(file);
+      setError(null);
+    }
+  };
+
+  const uploadImage = async (file: File): Promise<string> => {
+    if (!user) {
+      throw new Error('User must be authenticated to upload images');
+    }
+
+    try {
+      // Log Firebase configuration
+      console.log('Firebase Storage Configuration:', {
+        storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+        projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+        authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN
+      });
+
+      // Create a unique filename
+      const filename = `${user.uid}_${Date.now()}_${file.name}`;
+      
+      // Create storage reference
+      const storageRef = ref(storage, `posts/${filename}`);
+      console.log('Storage reference created:', {
+        fullPath: storageRef.fullPath,
+        bucket: storageRef.bucket,
+        name: storageRef.name
+      });
+
+      // Upload file
+      console.log('Starting file upload...', {
+        fileSize: file.size,
+        fileType: file.type,
+        fileName: file.name
+      });
+
+      const metadata = {
+        contentType: file.type,
+        customMetadata: {
+          userId: user.uid,
+          uploadedAt: Date.now().toString()
+        }
+      };
+
+      const snapshot = await uploadBytes(storageRef, file, metadata);
+      console.log('File uploaded successfully:', {
+        path: snapshot.ref.fullPath,
+        size: snapshot.metadata.size,
+        contentType: snapshot.metadata.contentType
+      });
+
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      console.log('Download URL obtained:', downloadURL);
+
+      return downloadURL;
+    } catch (error: any) {
+      console.error('Upload error details:', {
+        code: error.code,
+        message: error.message,
+        name: error.name,
+        stack: error.stack,
+        user: user ? {
+          uid: user.uid,
+          email: user.email,
+          isAnonymous: user.isAnonymous
+        } : 'No user'
+      });
+      throw new Error(`Failed to upload image: ${error.message}`);
     }
   };
 
@@ -25,14 +99,22 @@ export default function CreatePost() {
     if (!user || !content.trim()) return;
 
     setIsLoading(true);
+    setError(null);
 
     try {
       let imageURL = '';
 
       if (image) {
-        const storageRef = ref(storage, `posts/${Date.now()}_${image.name}`);
-        await uploadBytes(storageRef, image);
-        imageURL = await getDownloadURL(storageRef);
+        try {
+          console.log('Starting image upload process...');
+          imageURL = await uploadImage(image);
+          console.log('Image upload completed, URL:', imageURL);
+        } catch (uploadError: any) {
+          console.error('Image upload failed:', uploadError);
+          setError(`Failed to upload image: ${uploadError.message}`);
+          setIsLoading(false);
+          return;
+        }
       }
 
       const postData = {
@@ -47,10 +129,19 @@ export default function CreatePost() {
         updatedAt: serverTimestamp()
       };
 
-      await addDoc(collection(db, 'posts'), postData);
+      console.log('Creating post with data:', {
+        ...postData,
+        createdAt: 'serverTimestamp',
+        updatedAt: 'serverTimestamp'
+      });
+
+      const docRef = await addDoc(collection(db, 'posts'), postData);
+      console.log('Post created successfully with ID:', docRef.id);
+      
       router.push('/');
-    } catch (error) {
-      console.error('Error creating post:', error);
+    } catch (error: any) {
+      console.error('Post creation failed:', error);
+      setError(`Failed to create post: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -69,6 +160,12 @@ export default function CreatePost() {
       <h1 className="text-2xl font-bold mb-6">Create Post</h1>
       
       <form onSubmit={handleSubmit} className="space-y-4">
+        {error && (
+          <div className="bg-red-50 border border-red-200 text-red-600 px-4 py-3 rounded-lg text-sm">
+            {error}
+          </div>
+        )}
+
         <div>
           <textarea
             value={content}
@@ -77,6 +174,7 @@ export default function CreatePost() {
             className="w-full p-4 border rounded-lg resize-none"
             rows={4}
             required
+            disabled={isLoading}
           />
         </div>
 
@@ -88,7 +186,11 @@ export default function CreatePost() {
               accept="image/*"
               onChange={handleImageChange}
               className="mt-1 block w-full"
+              disabled={isLoading}
             />
+            <p className="text-sm text-gray-500 mt-1">
+              Maximum file size: 5MB
+            </p>
           </label>
         </div>
 
@@ -103,6 +205,7 @@ export default function CreatePost() {
               type="button"
               onClick={() => setImage(null)}
               className="absolute top-2 right-2 bg-red-500 text-white p-2 rounded-full hover:bg-red-600"
+              disabled={isLoading}
             >
               Remove
             </button>
@@ -118,7 +221,14 @@ export default function CreatePost() {
               : 'bg-blue-500 hover:bg-blue-600'
           }`}
         >
-          {isLoading ? 'Creating...' : 'Create Post'}
+          {isLoading ? (
+            <div className="flex items-center justify-center">
+              <div className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin mr-2"></div>
+              Creating...
+            </div>
+          ) : (
+            'Create Post'
+          )}
         </button>
       </form>
     </div>

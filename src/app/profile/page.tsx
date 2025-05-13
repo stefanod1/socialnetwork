@@ -2,12 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import Image from 'next/image';
-import { collection, query, where, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, query, where, orderBy, onSnapshot, doc, getDoc, updateDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase/firebase';
 import { Post as PostType, User } from '@/lib/types/social';
 import Post from '@/components/Post';
 import { useAuth } from '@/lib/hooks/useAuth';
-import { doc, updateDoc } from 'firebase/firestore';
 
 export default function Profile() {
   const { user } = useAuth();
@@ -16,24 +15,82 @@ export default function Profile() {
   const [bio, setBio] = useState('');
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      console.log('No user found, returning early');
+      return;
+    }
 
-    const q = query(
-      collection(db, 'posts'),
-      where('authorId', '==', user.uid),
-      orderBy('createdAt', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const postsData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as PostType[];
-      
-      setUserPosts(postsData);
+    console.log('User found:', {
+      uid: user.uid,
+      email: user.email,
+      displayName: user.displayName
     });
 
-    return () => unsubscribe();
+    // Fetch user's profile data
+    const fetchUserProfile = async () => {
+      try {
+        const userRef = doc(db, 'users', user.uid);
+        const userDoc = await getDoc(userRef);
+        if (userDoc.exists()) {
+          const userData = userDoc.data();
+          setBio(userData.bio || '');
+          console.log('User profile fetched:', userData);
+        } else {
+          console.log('No user profile found in Firestore');
+        }
+      } catch (error) {
+        console.error('Error fetching user profile:', error);
+      }
+    };
+
+    fetchUserProfile();
+
+    try {
+      console.log('Setting up posts query...');
+      const postsRef = collection(db, 'posts');
+      const q = query(
+        postsRef,
+        where('authorId', '==', user.uid),
+        orderBy('createdAt', 'desc')
+      );
+
+      console.log('Posts query created:', {
+        userId: user.uid,
+        collection: 'posts',
+        conditions: ['authorId == user.uid', 'orderBy createdAt desc']
+      });
+
+      const unsubscribe = onSnapshot(q, 
+        (snapshot) => {
+          console.log('Posts snapshot received:', {
+            empty: snapshot.empty,
+            size: snapshot.size,
+            docs: snapshot.docs.map(doc => ({
+              id: doc.id,
+              data: doc.data()
+            }))
+          });
+          
+          const postsData = snapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          })) as PostType[];
+          
+          console.log('Processed posts data:', postsData);
+          setUserPosts(postsData);
+        },
+        (error) => {
+          console.error('Error in posts snapshot listener:', error);
+        }
+      );
+
+      return () => {
+        console.log('Cleaning up posts listener');
+        unsubscribe();
+      };
+    } catch (error) {
+      console.error('Error setting up posts query:', error);
+    }
   }, [user]);
 
   const handleUpdateProfile = async () => {
@@ -112,9 +169,13 @@ export default function Profile() {
 
       <h2 className="text-xl font-semibold mb-4">Your Posts</h2>
       <div className="space-y-4">
-        {userPosts.map((post) => (
-          <Post key={post.id} post={post} />
-        ))}
+        {userPosts.length === 0 ? (
+          <p className="text-gray-500 text-center">No posts yet</p>
+        ) : (
+          userPosts.map((post) => (
+            <Post key={post.id} post={post} />
+          ))
+        )}
       </div>
     </div>
   );
